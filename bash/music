@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Function to get the metadata for a player
+get_metadata() {
+    local player="$1"
+    playerctl --player="$player" metadata --format '{{xesam:title}} | {{xesam:artist}} | {{xesam:album}}' 2>/dev/null
+}
+
+# Function to get the status for a player
+get_status() {
+    local player="$1"
+    playerctl --player="$player" status 2>/dev/null
+}
+
+# Function to update and display the metadata
+update_display() {
+    # Check if any player is playing
+    if playerctl status -a | grep -q "Playing"; then
+        local player
+        local title
+        local status
+
+        # Get the metadata of the first active player that is playing
+        for player in $(playerctl -l); do
+            status=$(get_status "$player")
+            title=$(get_metadata "$player")
+
+            if [[ "$status" == "Playing" && -n "$title" ]]; then
+                echo "$title"
+                return
+            fi
+        done
+    else
+        # Check the status for 'mpd'
+        local mpd_status
+        mpd_status=$(playerctl --player=mpd status 2>/dev/null)
+
+        if [[ -n "$mpd_status" ]]; then
+            local title
+            title=$(get_metadata "mpd")
+            echo "$title"
+        else
+            # If no player is playing or `mpd` is not available, show no output
+            echo "No music"
+        fi
+    fi
+}
+
+# Run the function
+update_display

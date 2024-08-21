@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# Usage:
+# ./volume_script.sh toggle   # Toggle mute/unmute the current device
+# ./volume_script.sh up       # Increase volume by 5%
+# ./volume_script.sh down     # Decrease volume by 5%
+# ./volume_script.sh display  # Display the current volume, mute status, and output device
+
+# Function to get the current volume level
+get_volume() {
+    amixer get Master | grep -oP '[0-9]+(?=%)' | head -1
+}
+
+# Function to get mute status
+is_muted() {
+    pactl get-sink-mute @DEFAULT_SINK@ | grep -q "yes"
+}
+
+# Function to determine if the output is through speakers or headphones
+get_output_device() {
+    # Get the active port name for the default sink
+    active_port=$(pactl list sinks | grep -A 20 'Active Port' | grep 'Active Port' | awk '{print $3}')
+
+    # Check if the active port contains "headphone" or "speaker"
+    if echo "$active_port" | grep -q "headphone"; then
+        icon=""
+    elif echo "$active_port" | grep -q "speaker"; then
+        vol=$(get_volume)
+        if [ "$vol" -ge 70 ]; then
+            icon=" "   # High volume icon
+        elif [ "$vol" -ge 30 ]; then
+            icon=""  # Medium volume icon
+        else
+            icon=""  # Low volume icon
+        fi
+    else
+        icon=" "
+    fi
+    echo $icon
+}
+
+# Function to display the volume, mute status, and output device
+display_volume() {
+    local device=$(get_output_device)
+    vol=$(get_volume)
+    icon=$(get_output_device)
+    if is_muted; then
+        echo " muted"  # Mute icon and text with device
+    else
+        echo "$icon $vol%"
+    fi
+}
+
+# Function to toggle mute status
+toggle_mute() {
+    pactl set-sink-mute @DEFAULT_SINK@ toggle > /dev/null 2>&1
+    display_volume
+}
+
+# Function to adjust the volume
+adjust_volume() {
+    if [ "$1" == "up" ]; then
+        amixer set Master 5%+ > /dev/null 2>&1
+    elif [ "$1" == "down" ]; then
+        amixer set Master 5%- > /dev/null 2>&1
+    fi
+    display_volume
+}
+
+# Parse command-line arguments
+case "$1" in
+    toggle)
+        toggle_mute
+        ;;
+    up)
+        adjust_volume up
+        ;;
+    down)
+        adjust_volume down
+        ;;
+    display)
+        display_volume
+        ;;
+    *)
+        echo "Usage: $0 {toggle|up|down|display}"
+        exit 1
+        ;;
+esac
