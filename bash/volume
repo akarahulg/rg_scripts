@@ -5,6 +5,7 @@
 # ./volume_script.sh up       # Increase volume by 5%
 # ./volume_script.sh down     # Decrease volume by 5%
 # ./volume_script.sh display  # Display the current volume, mute status, and output device
+# ./volume_script.sh switch   # Switch between headphones and speakers
 
 # Function to get the current volume level
 get_volume() {
@@ -16,34 +17,37 @@ is_muted() {
     pactl get-sink-mute @DEFAULT_SINK@ | grep -q "yes"
 }
 
+# Function to get the active port for the default sink
+get_active_port() {
+    DEFAULT_SINK=$(pactl info | grep "Default Sink" | awk '{print $3}')
+    pactl list sinks | awk "/Name: $DEFAULT_SINK/{found=1} found && /Active Port/{print \$3; exit}"
+}
+
 # Function to determine if the output is through speakers or headphones
 get_output_device() {
-    # Get the active port name for the default sink
-    active_port=$(pactl list sinks | grep -A 20 'Active Port' | grep 'Active Port' | awk '{print $3}')
+    active_port=$(get_active_port)
 
     # Check if the active port contains "headphone" or "speaker"
     if echo "$active_port" | grep -q "headphone"; then
-        icon=""
+        echo ""  # Headphone icon
     elif echo "$active_port" | grep -q "speaker"; then
         vol=$(get_volume)
         if [ "$vol" -ge 70 ]; then
-            icon=" "   # High volume icon
+            echo ""   # High volume icon
         elif [ "$vol" -ge 30 ]; then
-            icon=""  # Medium volume icon
+            echo ""  # Medium volume icon
         else
-            icon=""  # Low volume icon
+            echo ""  # Low volume icon
         fi
     else
-        icon=" "
+        echo ""  # Default to speaker icon if no match
     fi
-    echo $icon
 }
 
 # Function to display the volume, mute status, and output device
 display_volume() {
-    local device=$(get_output_device)
-    vol=$(get_volume)
     icon=$(get_output_device)
+    vol=$(get_volume)
     if is_muted; then
         echo " muted"  # Mute icon and text with device
     else
@@ -67,6 +71,26 @@ adjust_volume() {
     display_volume
 }
 
+# Function to switch between headphones and speakers
+switch_output_device() {
+    DEFAULT_SINK=$(pactl info | grep "Default Sink" | awk '{print $3}')
+    # Adjust the -A number to get the acitve port
+    ACTIVE_PORT=$(pactl list sinks | grep -A 150 -E "Name: $DEFAULT_SINK" | grep "Active Port" | awk -F': ' '{print $2}')
+
+    # This may change from device to device
+    HEADPHONES_PORT="analog-output-headphones"
+    SPEAKERS_PORT="analog-output-speaker"
+
+    # Switch between headphones and speakers
+    if [[ "$ACTIVE_PORT" == "$HEADPHONES_PORT" ]]; then
+        pactl set-sink-port "$DEFAULT_SINK" "$SPEAKERS_PORT"
+    elif [[ "$ACTIVE_PORT" == "$SPEAKERS_PORT" ]]; then
+        pactl set-sink-port "$DEFAULT_SINK" "$HEADPHONES_PORT"
+    else
+        notify-send "Audio Output" "Unknown port: $ACTIVE_PORT"
+    fi
+}
+
 # Parse command-line arguments
 case "$1" in
     toggle)
@@ -81,8 +105,11 @@ case "$1" in
     display)
         display_volume
         ;;
+    switch)
+        switch_output_device
+        ;;
     *)
-        echo "Usage: $0 {toggle|up|down|display}"
+        echo "Usage: $0 {toggle|up|down|display|switch}"
         exit 1
         ;;
 esac

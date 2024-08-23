@@ -26,7 +26,7 @@ update_display() {
             title=$(get_metadata "$player")
 
             if [[ "$status" == "Playing" && -n "$title" ]]; then
-                echo "$title"
+                echo "$player :::: $title"
                 return
             fi
         done
@@ -38,10 +38,10 @@ update_display() {
         if [[ -n "$mpd_status" ]]; then
             local title
             title=$(get_metadata "mpd")
-            echo "$title"
+            echo "mpd :::: $title"
         else
             # If no player is playing or `mpd` is not available, show no output
-            echo "No music"
+            echo ""
         fi
     fi
 }
