@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # Function to get the metadata for a player
@@ -14,51 +15,25 @@ get_status() {
 
 # Function to update and display the metadata
 update_display() {
-    # Check if any player is playing
-    if playerctl status -a | grep -q "Playing"; then
-        local player
-        local title
-        local status
+    # Iterate over all players and mpd
+    for player in $(playerctl -l); do
+        local status=$(get_status "$player")
+        local title=$(get_metadata "$player")
 
-        # Get the metadata of the first active player that is playing
-        for player in $(playerctl -l); do
-            status=$(get_status "$player")
-            title=$(get_metadata "$player")
-
-	    if [[ "$status" == "Playing" && -n "$title" ]]; then
-                echo "$player :::: $title"
-                return
-            fi
-        done
-    elif playerctl status -a | grep -q "Paused"; then
-        local player
-        local title
-        local status
-
-        # Get the metadata of the first active player that is playing
-        for player in $(playerctl -l); do
-            status=$(get_status "$player")
-            title=$(get_metadata "$player")
-
-	    if [[ "$status" == "Paused" && -n "$title" ]]; then
-                echo "$player :::: $title"
-                return
-            fi
-        done
-
-    else
-        # Check the status for 'mpd'
-        local mpd_status
-        mpd_status=$(playerctl --player=mpd,%any status 2>/dev/null)
-
-        if [[ -n "$mpd_status" ]]; then
-            local title
-            title=$(get_metadata "mpd")
-            echo "mpd :::: $title"
-        else
-            # If no player is playing or `mpd` is not available, show no output
-            echo ""
+        if [[ "$status" == "Playing" || "$status" == "Paused" ]] && [[ -n "$title" ]]; then
+            echo "$player :::: $title"
+            return
         fi
+    done
+
+    # If no player found, check the status for 'mpd'
+    local mpd_status=$(playerctl --player=mpd,%any status 2>/dev/null)
+    if [[ -n "$mpd_status" ]]; then
+        local title=$(get_metadata "mpd")
+        echo "mpd :::: $title"
+    else
+        # If no player is playing or `mpd` is not available, show no output
+        echo ""
     fi
 }
 
