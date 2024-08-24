@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#paused=$(dunstctl is-paused)
+case "$1" in
+    --toggle)
+        dunstctl set-paused toggle
+        ;;
+     *)
+         #if [[ $paused == "true" ]]; then
+         if [[ "$(dunstctl is-paused)" = "true" ]]; then
+            echo ""
+            #echo "  Paused True"
+         #dunstctl set-paused false && sleep 1s &&  notify-send "Notifications" "Enabling notifications..."
+        else
+            echo ""
+            #echo " Paused False"
+        #notify-send "Notifications" "Disabling notifications..." && sleep 3s && dunstctl set-paused true
+        fi
+        ;;
+esac
