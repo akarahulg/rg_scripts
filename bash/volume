@@ -9,7 +9,8 @@
 
 # Function to get the current volume level
 get_volume() {
-    amixer get Master | grep -oP '[0-9]+(?=%)' | head -1
+    # amixer get Master | grep -oP '[0-9]+(?=%)' | head -1
+    pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '[0-9]+(?=%)' | head -1
 }
 
 # Function to get mute status
