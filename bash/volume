@@ -64,9 +64,11 @@ toggle_mute() {
 # Function to adjust the volume
 adjust_volume() {
     if [ "$1" == "up" ]; then
-        amixer set Master 5%+ > /dev/null 2>&1
+        # amixer set Master 5%+ > /dev/null 2>&1
+	pactl set-sink-volume @DEFAULT_SINK@ +5000 > /dev/null 2>&1
     elif [ "$1" == "down" ]; then
-        amixer set Master 5%- > /dev/null 2>&1
+        # amixer set Master 5%- > /dev/null 2>&1
+	pactl set-sink-volume @DEFAULT_SINK@ -5000 > /dev/null 2>&1
     fi
     display_volume
 }
