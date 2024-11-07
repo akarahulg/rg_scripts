@@ -1,0 +1,13 @@
+#!/bin/sh
+
+cat <<EOF | xmenu | sh &
+Apps
+	Brave	brave
+	Terminal	xfce4-terminal
+Bluetooth	blueman-manager
+PCManFM		pcmanfm
+Actions
+	Suspend	        systemctl suspend
+	Reboot	reboot
+	Poweroff	poweroff
+EOF
