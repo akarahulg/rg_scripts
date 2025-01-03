@@ -1,0 +1,8 @@
+#!/bin/bash
+# This script is for importing the selected url to buku database and send a
+# desktop notification. It is to be bound to a shortcut key
+
+url=$(xclip -o --selection primary)
+echo $url
+notify-send "Adding bookmark for $url"
+alacritty -e buku -w 'vim' -a "$url"
