@@ -5,7 +5,7 @@ Apps
 	Brave	brave
 	Terminal (xfce4)	xfce4-terminal
 Bluetooth	blueman-manager
-PCManFM		pcmanfm
+PCManFM		pcmanfm-qt
 Telegram	telegram-desktop
 Torrent		qbittorrent
 EOF
