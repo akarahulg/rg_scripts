@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Set variables
+WALLPAPER_DIR="$HOME/Pictures/BingWallpapers"
+BING_URL="https://www.bing.com"
+RESOLUTION="1920x1080"  # or "UHD" for 4K (depends on Bing availability)
+
+# Create the directory if it doesn't exist
+mkdir -p "$WALLPAPER_DIR"
+
+# Get today's Bing wallpaper metadata
+JSON=$(curl -s "${BING_URL}/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US")
+IMG_URL=$(echo "$JSON" | grep -oP '(?<="url":")[^"]+')
+
+# Full URL to the image
+FULL_IMG_URL="${BING_URL}${IMG_URL/&rf=.*$/}&rf=LaDigue_${RESOLUTION}.jpg"
+
+# Get the image filename
+FILENAME=$(basename "${IMG_URL}" | cut -d'&' -f1)
+
+# Download the image if not already downloaded
+if [ ! -f "${WALLPAPER_DIR}/${FILENAME}" ]; then
+    curl -s -o "${WALLPAPER_DIR}/${FILENAME}" "${FULL_IMG_URL}"
+fi
+
+# Set wallpaper (example with feh, but you can change depending on your desktop)
+feh --bg-fill "${WALLPAPER_DIR}/${FILENAME}"
+
+
