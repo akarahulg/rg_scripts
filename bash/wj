@@ -1,0 +1,274 @@
+#!/bin/bash
+
+required_packages=(
+    tufte-book
+    ulem
+    soul
+    hyperref
+    todonotes
+    xargs
+)
+
+missing=()
+
+for pkg in "${required_packages[@]}"; do
+    if ! kpsewhich "$pkg.sty" > /dev/null && ! kpsewhich "$pkg.cls" > /dev/null; then
+        missing+=("$pkg")
+    fi
+done
+
+if [ "${#missing[@]}" -ne 0 ]; then
+    echo "❌ Missing LaTeX packages:"
+    for pkg in "${missing[@]}"; do
+        echo "  - $pkg"
+    done
+else
+    echo "✅ All required LaTeX packages are installed."
+fi
+
+JOURNAL_DIR="$HOME/git/personal/linn/work-journal"
+mkdir -p "$JOURNAL_DIR"
+ENTRIES_DIR="$JOURNAL_DIR/entries"
+ENTRIES_TEX="$JOURNAL_DIR/entries.tex"
+JOURNAL_TEX="$JOURNAL_DIR/journal.tex"
+
+DATE=$(date +%Y-%m-%d)
+FILENAME="$DATE.tex"
+FILEPATH="$ENTRIES_DIR/$FILENAME"
+
+mkdir -p "$ENTRIES_DIR"
+
+# Initialize journal.tex if not present
+if [ ! -f "$JOURNAL_TEX" ]; then
+    echo "📔 Initializing journal.tex"
+    cat <<EOF > "$JOURNAL_TEX"
+\documentclass{tufte-book}
+
+% --- FONT, ENCODING, AND LAYOUT PACKAGES ---
+\usepackage[T1]{fontenc}
+\usepackage[normalem]{ulem} 
+\usepackage{soul}           
+\usepackage{arev}           
+\usepackage{amssymb}        
+\usepackage{xcolor}
+\usepackage{xargs}          
+
+% --- DATETIME & ZREF ---
+% \usepackage[en-US, style=dateformat=long]{datetime2} 
+\usepackage[en-US]{datetime2} 
+\usepackage{zref-user}
+
+% --- HYPERREF SETUP ---
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    bookmarksdepth=subsection,
+}
+
+% --- CUSTOM COLOR DEFINITIONS ---
+\definecolor{TaskImp}{HTML}{D9534F}     
+\definecolor{TaskDone}{HTML}{428BCA}    
+\definecolor{TaskNote}{HTML}{5BC0DE}    
+\definecolor{TaskThought}{HTML}{777777} 
+\definecolor{SubTaskDone}{HTML}{407076} 
+\definecolor{Task}{HTML}{333B3E}     
+\definecolor{Backlog}{HTML}{5CB85C}     
+\definecolor{TaskPlan}{HTML}{8A2BE2}
+\definecolor{DateHeading}{HTML}{666666}
+
+% --- TUFTE MARGINNOTE COMMANDS (Unchanged) ---
+\newcommand{\nuni}{\marginnote{--- Not Urgent, Not Important}}
+\newcommand{\uni}{\marginnote{--- Urgent, Not Important}}
+\newcommand{\nui}{\marginnote{--- Not Urgent, Important}}
+\newcommand{\ui}{\marginnote{--- Urgent, Important}}
+\newcommand{\mn}[1]{\marginnote{--- #1}}
+\newcommand{\distraction}[1]{#1 \mn{distraction}}
+
+% =========================================================================
+% --- CORE TASK MANAGEMENT SYSTEM (DEFINITIVE CORRECTED VERSION) ---
+% =========================================================================
+
+\makeatletter
+
+% --- SETUP ---
+\newcounter{todonotesnumber}
+\setcounter{tocdepth}{10} 
+\zref@newprop{entrydate}[unknown]{\textbf{??}}
+
+% --- Macros to track the last date printed in each list ---
+\newcommand{\lastTdoDate}{}
+\newcommand{\lastOdoDate}{}
+\newcommand{\lastBgoDate}{}
+
+% --- KEY-VALUE OPTIONS FOR TASKS ---
+\SetupKeyvalOptions{family=todo,prefix=todo@}
+\define@key{todo}{color}{\def\todocolor{#1}}
+\newif\ifTodoIsDone
+\define@key{todo}{done}[true]{\TodoIsDonetrue}
+\newif\ifTodoIsStruck
+\define@key{todo}{strike}[true]{\TodoIsStrucktrue}
+\define@key{todo}{donedate}{\def\tododonedate{#1}}
+\define@key{todo}{plan}{\def\todoplandate{#1}} 
+
+\newcommand{\todotextformat}[1]{#1}
+
+% --- MAIN TODO COMMAND ---
+\newcommand{\todo}[2][]{%
+  \refstepcounter{todonotesnumber}\phantomsection
+  \def\todocolor{black}\def\tododonedate{}\def\todoplandate{}\TodoIsDonefalse\TodoIsStruckfalse
+  \setkeys{todo}{#1}%
+  
+  \ifTodoIsStruck\renewcommand{\todotextformat}[1]{\sout{##1}}\else\renewcommand{\todotextformat}[1]{##1}\fi
+  \def\plantag{}
+  
+  \ifx\todoplandate\empty\else
+      \def\plantag{\textcolor{TaskPlan}{\small~[Plan: \todoplandate]}}%
+      \ifx\todocolor\unmodified\def\todocolor{TaskPlan}\fi
+  \fi
+  
+  \ifTodoIsDone
+    % --- LOGIC FOR DONE TASKS LIST ---
+    \ifx\tododonedate\empty\edef\tododonedate{\zref@getcurrent{entrydate}}\fi
+    \ifx\tododonedate\lastOdoDate\else
+        % FIX: Write ONLY plain text to the list file.
+        \protected@edef\dateheadingtext{--- Completed on \DTMlongdate{\tododonedate} ---}
+        \addcontentsline{odo}{subsection}{\dateheadingtext}
+        \xdef\lastOdoDate{\tododonedate}
+    \fi
+    \protected@edef\listentry{\thetodonotesnumber: #2}%
+    \addcontentsline{odo}{section}{\listentry}%
+    \def\taskicon{\boxtimes}\def\taskcolor{TaskDone}%
+  \else
+    % --- LOGIC FOR TODO TASKS LIST ---
+    \edef\creationdate{\zref@getcurrent{entrydate}}
+    \ifx\creationdate\lastTdoDate\else
+        % FIX: Write ONLY plain text to the list file.
+        \protected@edef\dateheadingtext{--- Created on \DTMlongdate{\creationdate} ---}
+        \addcontentsline{tdo}{subsection}{\dateheadingtext}
+        \xdef\lastTdoDate{\creationdate}
+    \fi
+    \protected@edef\listentry{\thetodonotesnumber: #2}%
+    \addcontentsline{tdo}{section}{\listentry}%
+    \def\taskicon{\square}\def\taskcolor{\todocolor}%
+  \fi
+
+  \par\noindent\textbf{\thetodonotesnumber.}~{\Large\raisebox{-0.1em}{\textcolor{\taskcolor}{$\taskicon$}}}~\textcolor{\taskcolor}{\todotextformat{#2}}\plantag\par
+}
+
+% --- Backlog command with list date logic ---
+\newcommand{\backlog}[2][]{%
+    \refstepcounter{todonotesnumber}\phantomsection
+    \def\todocolor{Backlog}\def\todoplandate{}\setkeys{todo}{#1}%
+    \def\plantag{}\def\datetag{}
+    
+    \ifx\todoplandate\empty
+        \edef\thedate{\zref@getcurrent{entrydate}}
+        \def\datetype{Created}
+    \else
+        \edef\thedate{\todoplandate}
+        \def\plantag{\textcolor{TaskPlan}{\small~[Plan: \todoplandate]}}%
+        \def\datetype{Planned for}
+    \fi
+
+    \ifx\thedate\lastBgoDate\else
+        % FIX: Write ONLY plain text to the list file.
+        \protected@edef\dateheadingtext{--- \datetype \space \DTMlongdate{\thedate} ---}
+        \addcontentsline{bgo}{subsection}{\dateheadingtext}
+        \xdef\lastBgoDate{\thedate}
+    \fi
+    \protected@edef\listentry{\thetodonotesnumber: #2}%
+    \addcontentsline{bgo}{section}{\listentry}%
+    \par\noindent\textbf{\thetodonotesnumber.}~{\Large\raisebox{-0.1em}{\textcolor{\todocolor}{$\square$}}}~\textcolor{\todocolor}{#2}\plantag\par
+}
+
+% --- Helper commands (unchanged) ---
+\newcommand{\imptodo}[2][]{\todo[color=TaskImp, #1]{#2}}
+\newcommand{\now}[2][]{\imptodo[#1]{#2}}
+\newcommandx{\subtodo}[2][1=]{\TodoIsDonefalse\setkeys{todo}{#1}\ifTodoIsDone\def\subicon{\checkmark}\def\subcolor{SubTaskDone}\else\def\subicon{\square}\def\subcolor{Task}\fi\par\noindent\hspace{2.5em}{\small\raisebox{0.05em}{\textcolor{\subcolor}{$\subicon$}}}~\textcolor{\subcolor}{#2}\par}
+\newcommand{\tasknote}[1]{\par\noindent\hspace{2.5em}\textcolor{TaskNote}{-- \textit{#1}}\par}
+\newcommand{\taskthought}[1]{\par\noindent\hspace{2.5em}\textcolor{TaskThought}{-- \textit{#1}}\par}
+
+% --- COMMANDS TO GENERATE LISTS ---
+\newcommand{\generatelist}[2]{%
+    \section*{#1}%
+    \begingroup
+    % For task items (level 1)
+    \renewcommand*{\l@section}[2]{%
+        \ifnum 1>\c@tocdepth \else
+            \par\noindent\leftskip=2.5em ##1\par
+        \fi
+    }
+    % For date headings (level 2)
+    \renewcommand*{\l@subsection}[2]{%
+        \ifnum 2>\c@tocdepth \else
+            \addvspace{0.5\baselineskip}\par\noindent
+            % FIX: Apply formatting HERE, during typesetting.
+            {\normalfont\bfseries\color{DateHeading}##1}\par
+        \fi
+    }
+    \@starttoc{#2}%
+    \endgroup
+}
+
+\newcommand{\listoftodos}{\generatelist{List of Todos}{tdo}}
+\newcommand{\listofdonetodos}{\generatelist{List of Done Todos}{odo}}
+\newcommand{\listofbacklogs}{\generatelist{List of Backlog Tasks}{bgo}}
+
+
+% --- FIX: Use a unique command name to avoid package conflicts ---
+\DeclareRobustCommand{\journaldate}[1]{%
+    % \edef\myDateString{\DTMweekdayname{#1}, \DTMlongdate{#1}}%
+    \edef\myDateString{\DTMweekdayname{#1}}%
+    \subsection*{\myDateString}%
+    \zref@setcurrent{entrydate}{#1}%
+    \gdef\lastTdoDate{}\gdef\lastOdoDate{}\gdef\lastBgoDate{}%
+}
+
+\makeatother
+% =========================================================================
+
+\begin{document}
+
+% --- Journal entries follow ---
+\chapter*{Journal Entries} 
+
+% To make this example fully compilable, a dummy entries.tex is created.
+% You must use \journaldate instead of \entrydate in your actual file.
+\input{entries.tex} 
+% --- Lists at the beginning ---
+\chapter*{Task Lists}
+\listoftodos
+\listofdonetodos
+\listofbacklogs
+
+
+\end{document}
+
+EOF
+
+fi
+# If entry already exists, just open it
+if [ -f "$FILEPATH" ]; then
+    echo "📓 Entry for $DATE already exists. Opening it..."
+    nvim "$FILEPATH"
+    exit 0
+fi
+
+# Create the new entry file with no title generated
+cat <<EOF > "$FILEPATH"
+% !TEX root = ../journal.tex
+\\journaldate{$DATE}
+EOF
+
+# Add to entries.tex if not already included
+if ! grep -q "$FILENAME" "$ENTRIES_TEX"; then
+    echo "\\input{entries/${FILENAME}}" >> "$ENTRIES_TEX"
+fi
+
+# Open the new entry
+nvim "$FILEPATH"
+
+echo "✅ New entry saved: $FILENAME"
