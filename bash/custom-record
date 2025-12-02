@@ -1,0 +1,262 @@
+#!/bin/bash
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+# Base location
+BASE_DIR="$HOME/Videos/Recordings"
+
+# Generate Timestamp
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+
+# Create Session Folder
+SESSION_DIR="$BASE_DIR/$TIMESTAMP"
+mkdir -p "$SESSION_DIR"
+
+# Logs
+LOG_DIR="$SESSION_DIR/logs"
+mkdir -p "$LOG_DIR"
+
+# Filenames
+FILE_SCREEN="$SESSION_DIR/raw_screen.mkv"
+FILE_WEBCAM="$SESSION_DIR/raw_webcam.mkv"
+FILE_MIC_WAV="$SESSION_DIR/raw_mic.wav"
+FILE_SYS_WAV="$SESSION_DIR/raw_sys.wav"
+FILE_FINAL="$SESSION_DIR/final_render.mkv"
+
+# Visual Overlay Settings (Rectangular)
+CAM_WIDTH=320
+BORDER_WIDTH=8  # Thickness of the yellow box
+MARGIN=30       # Distance from bottom-right corner
+
+# ==============================================================================
+# 0. SYSTEM CHECK
+# ==============================================================================
+if [ -f "/usr/bin/ffmpeg" ]; then
+    FFMPEG_CMD="/usr/bin/ffmpeg"
+else
+    echo "WARNING: /usr/bin/ffmpeg not found. Falling back to 'ffmpeg'."
+    FFMPEG_CMD="ffmpeg"
+fi
+
+# ==============================================================================
+# 1. HARDWARE SELECTION
+# ==============================================================================
+clear
+echo "========================================================"
+echo "      FFMPEG RECORDER (YUYV WEBCAM / WAV AUDIO)         "
+echo "========================================================"
+echo "Output Folder: $SESSION_DIR"
+echo "--------------------------------------------------------"
+
+# --- 1A. Select Monitor ---
+echo "[1/4] Detecting Monitors..."
+MON_NAMES=()
+MON_GEOMS=()
+
+while read -r line; do
+    NAME=$(echo "$line" | awk '{print $1}')
+    GEOM=$(echo "$line" | grep -oP '[0-9]+x[0-9]+\+[0-9]+\+[0-9]+')
+    if [ ! -z "$GEOM" ]; then
+        MON_NAMES+=("$NAME")
+        MON_GEOMS+=("$GEOM")
+    fi
+done < <(xrandr | grep " connected")
+
+if [ ${#MON_NAMES[@]} -eq 0 ]; then
+    echo "Error: No monitors detected."
+    exit 1
+fi
+
+for i in "${!MON_NAMES[@]}"; do 
+    echo "  [$i] ${MON_NAMES[$i]} (${MON_GEOMS[$i]})"
+done
+
+read -p "Select Monitor [0-$((${#MON_NAMES[@]}-1))]: " MON_INDEX
+[ -z "$MON_INDEX" ] && MON_INDEX=0
+SELECTED_GEOM=${MON_GEOMS[$MON_INDEX]}
+
+SCREEN_RES=$(echo "$SELECTED_GEOM" | cut -d'+' -f1)
+OFFSET_X=$(echo "$SELECTED_GEOM" | cut -d'+' -f2)
+OFFSET_Y=$(echo "$SELECTED_GEOM" | cut -d'+' -f3)
+echo "-> Selected: ${MON_NAMES[$MON_INDEX]} (Offset: $OFFSET_X,$OFFSET_Y)"
+
+# --- 1B. Select Webcam ---
+echo -e "\n[2/4] Scanning Webcams..."
+WEBCAMS=($(ls /dev/video* 2>/dev/null))
+if [ ${#WEBCAMS[@]} -eq 0 ]; then
+    echo "  No webcam found."
+    WEBCAM_DEVICE=""
+else
+    for i in "${!WEBCAMS[@]}"; do echo "  [$i] ${WEBCAMS[$i]}"; done
+    read -p "Select Webcam [0-${#WEBCAMS[@]}] (Enter to skip): " CAM_INDEX
+    [ ! -z "$CAM_INDEX" ] && WEBCAM_DEVICE=${WEBCAMS[$CAM_INDEX]}
+fi
+
+# --- 1C. Select Microphone ---
+echo -e "\n[3/4] Scanning Microphones..."
+mapfile -t MIC_SOURCES < <(pactl list sources short | grep -v "\.monitor" | awk '{print $2}')
+for i in "${!MIC_SOURCES[@]}"; do echo "  [$i] ${MIC_SOURCES[$i]}"; done
+read -p "Select Mic [0-$((${#MIC_SOURCES[@]}-1))] (Enter to skip): " MIC_INDEX
+[ ! -z "$MIC_INDEX" ] && MIC_SOURCE=${MIC_SOURCES[$MIC_INDEX]}
+
+# --- 1D. Select System Audio ---
+echo -e "\n[4/4] Scanning System Audio..."
+mapfile -t SYS_SOURCES < <(pactl list sources short | grep "\.monitor" | awk '{print $2}')
+for i in "${!SYS_SOURCES[@]}"; do echo "  [$i] ${SYS_SOURCES[$i]}"; done
+read -p "Select System Audio [0-$((${#SYS_SOURCES[@]}-1))] (Enter to skip): " SYS_INDEX
+[ ! -z "$SYS_INDEX" ] && SYS_SOURCE=${SYS_SOURCES[$SYS_INDEX]}
+
+echo "--------------------------------------------------------"
+read -p "Press [ENTER] to START RECORDING..."
+
+# ==============================================================================
+# 2. RECORDING
+# ==============================================================================
+
+check_process() {
+    sleep 1
+    if ! kill -0 $1 2>/dev/null; then
+        echo "ERROR: Process (PID $1) crashed! Check logs in $LOG_DIR"
+        tail -n 2 "$2"
+        return 1
+    fi
+    return 0
+}
+
+# 1. Mic (WAV)
+if [ ! -z "$MIC_SOURCE" ]; then
+    LOG_MIC="$LOG_DIR/mic.log"
+    $FFMPEG_CMD -f pulse -i "$MIC_SOURCE" -ac 2 -c:a pcm_s16le -y "$FILE_MIC_WAV" > "$LOG_MIC" 2>&1 &
+    PID_MIC=$!
+    check_process $PID_MIC "$LOG_MIC"
+fi
+
+# 2. System Audio (WAV)
+if [ ! -z "$SYS_SOURCE" ]; then
+    LOG_SYS="$LOG_DIR/sys.log"
+    $FFMPEG_CMD -f pulse -i "$SYS_SOURCE" -ac 2 -c:a pcm_s16le -y "$FILE_SYS_WAV" > "$LOG_SYS" 2>&1 &
+    PID_SYS=$!
+    check_process $PID_SYS "$LOG_SYS"
+fi
+
+# 3. Webcam (MKV with x264 compression)
+if [ ! -z "$WEBCAM_DEVICE" ]; then
+    LOG_CAM="$LOG_DIR/cam.log"
+    # CHANGED: Using yuyv422 and compressing with libx264 ultrafast
+    $FFMPEG_CMD -f v4l2 -input_format yuyv422 -video_size 640x480 -framerate 30 -i "$WEBCAM_DEVICE" -c:v libx264 -preset ultrafast -qp 0 -y "$FILE_WEBCAM" > "$LOG_CAM" 2>&1 &
+    PID_CAM=$!
+    check_process $PID_CAM "$LOG_CAM"
+fi
+
+# 4. Screen (MKV)
+LOG_SCREEN="$LOG_DIR/screen.log"
+$FFMPEG_CMD -f x11grab -video_size "$SCREEN_RES" -framerate 30 -i :0.0+$OFFSET_X,$OFFSET_Y -c:v libx264 -preset ultrafast -qp 0 -y "$FILE_SCREEN" > "$LOG_SCREEN" 2>&1 &
+PID_SCREEN=$!
+
+check_process $PID_SCREEN "$LOG_SCREEN"
+if [ $? -ne 0 ]; then
+    echo "FATAL: Screen recording failed."
+    [ ! -z "$PID_MIC" ] && kill $PID_MIC
+    [ ! -z "$PID_SYS" ] && kill $PID_SYS
+    [ ! -z "$PID_CAM" ] && kill $PID_CAM
+    exit 1
+fi
+
+echo ">> RECORDING... (PIDS: Sc:$PID_SCREEN Ca:$PID_CAM Mi:$PID_MIC Sy:$PID_SYS)"
+echo ">> Press [ENTER] to STOP and MERGE."
+read -p ""
+
+# ==============================================================================
+# 3. CLEANUP
+# ==============================================================================
+echo "Stopping recordings..."
+[ ! -z "$PID_SCREEN" ] && kill -SIGINT $PID_SCREEN
+[ ! -z "$PID_CAM" ] && kill -SIGINT $PID_CAM
+[ ! -z "$PID_MIC" ] && kill -SIGINT $PID_MIC
+[ ! -z "$PID_SYS" ] && kill -SIGINT $PID_SYS
+wait 2>/dev/null
+echo "Files saved to: $SESSION_DIR"
+
+# ==============================================================================
+# 4. MERGING
+# ==============================================================================
+echo "Starting Post-Processing (Merging)..."
+
+INPUT_FLAGS="-i $FILE_SCREEN"
+INPUT_COUNT=1
+VIDEO_MAP="-map 0:v" 
+
+# --- Video Overlay Logic (Rectangular Yellow Box) ---
+if [ -s "$FILE_WEBCAM" ]; then
+    INPUT_FLAGS="$INPUT_FLAGS -i $FILE_WEBCAM"
+    
+    # Calculate sizes (requires bc)
+    YW=$((CAM_WIDTH + BORDER_WIDTH * 2))
+    CAM_HEIGHT=$(echo "$CAM_WIDTH * 9 / 16" | bc)
+    YH=$((CAM_HEIGHT + BORDER_WIDTH * 2))
+    
+    # Rectangular Overlay
+    VIDEO_FILTER="[1:v]scale=${CAM_WIDTH}:${CAM_HEIGHT}[cam_scaled];color=c=yellow:s=${YW}x${YH}[yellow_bg];[yellow_bg][cam_scaled]overlay=(W-w)/2:(H-h)/2[pip];[0:v][pip]overlay=main_w-overlay_w-${MARGIN}:main_h-overlay_h-${MARGIN}[v_out]"
+    
+    VIDEO_MAP="-map [v_out]"
+    INPUT_COUNT=$((INPUT_COUNT+1))
+else
+    VIDEO_FILTER=""
+fi
+
+# --- Audio Mixing Logic (WAV Inputs) ---
+AUDIO_FLAGS=""
+AUDIO_FILTER_PARTS=""
+HAS_AUDIO=0
+
+# Check for WAV audio files
+if [ -s "$FILE_MIC_WAV" ]; then
+    INPUT_FLAGS="$INPUT_FLAGS -i $FILE_MIC_WAV"
+    AUDIO_FILTER_PARTS="${AUDIO_FILTER_PARTS}[${INPUT_COUNT}:a]"
+    INPUT_COUNT=$((INPUT_COUNT+1))
+    HAS_AUDIO=1
+fi
+
+if [ -s "$FILE_SYS_WAV" ]; then
+    INPUT_FLAGS="$INPUT_FLAGS -i $FILE_SYS_WAV"
+    AUDIO_FILTER_PARTS="${AUDIO_FILTER_PARTS}[${INPUT_COUNT}:a]"
+    INPUT_COUNT=$((INPUT_COUNT+1))
+    HAS_AUDIO=1
+fi
+
+if [ "$HAS_AUDIO" -eq 1 ]; then
+    NUM_AUDIOS=$(echo "$AUDIO_FILTER_PARTS" | grep -o "\\[" | wc -l)
+    if [ "$NUM_AUDIOS" -gt 1 ]; then
+        AUDIO_FILTER="${AUDIO_FILTER_PARTS}amix=inputs=${NUM_AUDIOS}:duration=longest[a_out]"
+        AUDIO_MAP="-map [a_out]"
+    else
+        AUDIO_INDEX=$((INPUT_COUNT-1))
+        AUDIO_MAP="-map ${AUDIO_INDEX}:a"
+        AUDIO_FILTER=""
+    fi
+else
+    AUDIO_MAP=""
+    AUDIO_FILTER=""
+fi
+
+# --- Final Command Construction ---
+COMPLEX_FILTER=""
+[ ! -z "$VIDEO_FILTER" ] && COMPLEX_FILTER="$VIDEO_FILTER;"
+[ ! -z "$AUDIO_FILTER" ] && COMPLEX_FILTER="$COMPLEX_FILTER $AUDIO_FILTER"
+COMPLEX_FILTER=$(echo "$COMPLEX_FILTER" | sed 's/;$//')
+
+CMD_FILTER=""
+[ ! -z "$COMPLEX_FILTER" ] && CMD_FILTER="-filter_complex \"$COMPLEX_FILTER\""
+
+echo "Rendering final video..."
+CMD="$FFMPEG_CMD $INPUT_FLAGS $CMD_FILTER $VIDEO_MAP $AUDIO_MAP -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 192k -shortest \"$FILE_FINAL\""
+
+eval $CMD
+
+echo "========================================================"
+echo "SESSION COMPLETE"
+echo "Folder: $SESSION_DIR"
+echo "Final Video: $FILE_FINAL"
+echo "========================================================"
