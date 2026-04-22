@@ -49,6 +49,7 @@ today_entry() {
   cat <<EOF > "$FILE"
 % !TEX root = ../main.tex
 \\section{\\bf $DATE - $DAY}
+\\addcontentsline{etc}{section}{$DATE - $DAY}
 
 \\vspace{1em}\\noindent\\rule{\\linewidth}{0.4pt}
 
@@ -79,8 +80,10 @@ create_task() {
   fi
 
   cat <<EOF > "$file"
-\tasktitle{$name}
-\addcontentsline{toc}{section}{$name}
+% !TEX root = ../main.tex
+
+\\tasktitle{$name}
+\\addcontentsline{ttc}{section}{$name}
 
 \\begin{itemize}
 
@@ -132,11 +135,12 @@ delete_task() {
 
   rebuild_tasks
 
-  # Clean LaTeX cache
-  rm -f "$JOURNAL_DIR"/*.toc \
-        "$JOURNAL_DIR"/*.aux \
-        "$JOURNAL_DIR"/*.out
 
+  rm -f "$JOURNAL_DIR"/*.toc \
+      "$JOURNAL_DIR"/*.ttc \
+      "$JOURNAL_DIR"/*.etc \
+      "$JOURNAL_DIR"/*.aux \
+      "$JOURNAL_DIR"/*.out
   echo "♻️ LaTeX cache cleared. Recompile twice."
 }
 
@@ -148,7 +152,7 @@ archive_task() {
   [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
 
   mv "$file" "$ARCHIVE_DIR/"
-  echo "📦 Archived: $*"
+  echo "📦 Completed: $*"
   rebuild_tasks
 }
 
@@ -185,7 +189,8 @@ rebuild_tasks() {
   echo "% Auto-generated. Do not edit." > "$TASKS_INDEX"
   echo "" >> "$TASKS_INDEX"
 
-  for f in $(ls "$TASKS_DIR"/*.tex 2>/dev/null | sort); do
+  for f in "$TASKS_DIR"/*.tex; do
+  [ -e "$f" ] || continue
     if grep -q "^% HIDDEN" "$f"; then
       continue
     fi
@@ -202,7 +207,32 @@ rebuild_tasks() {
 # List tasks
 # -----------------------------------------
 list_tasks() {
-  ls "$TASKS_DIR" | sed 's/.tex//'
+  echo "📂 Active Tasks:"
+  echo "----------------"
+
+  for f in "$TASKS_DIR"/*.tex; do
+    [ -e "$f" ] || continue
+
+    name=$(basename "$f" .tex)
+
+    if grep -q "^% HIDDEN" "$f"; then
+      echo "🙈 $name (hidden)"
+    else
+      echo "• $name"
+    fi
+  done
+
+  echo ""
+  echo "📦 Completed Tasks:"
+  echo "------------------"
+
+  for f in "$ARCHIVE_DIR"/*.tex; do
+    [ -e "$f" ] || continue
+
+    name=$(basename "$f" .tex)
+    echo "• $name"
+
+  done
 }
 
 # -----------------------------------------
