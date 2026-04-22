@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+
+# =========================================
+# SecondBrain CLI (Tasks + Daily Journal)
+# =========================================
+
+JOURNAL_DIR="$HOME/git/personal/secondbrain"
+
+# --- Tasks ---
+TASKS_DIR="$JOURNAL_DIR/tasks"
+ARCHIVE_DIR="$TASKS_DIR/archive"
+TASKS_INDEX="$JOURNAL_DIR/tasks.tex"
+
+# --- Entries (Daily Journal) ---
+ENTRIES_DIR="$JOURNAL_DIR/entries"
+ENTRIES_TEX="$JOURNAL_DIR/entries.tex"
+
+mkdir -p "$TASKS_DIR" "$ARCHIVE_DIR" "$ENTRIES_DIR"
+
+# -----------------------------------------
+# Utils
+# -----------------------------------------
+slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-'
+}
+
+task_file() {
+  echo "$TASKS_DIR/$(slugify "$*").tex"
+}
+
+# -----------------------------------------
+# 📓 Today Journal
+# -----------------------------------------
+today_entry() {
+  local DATE=$(date +%Y-%m-%d)
+  local LABELDATE=$(date +%y%m%d)
+  local DAY=$(date +%a)
+
+  local FILE="$ENTRIES_DIR/$DATE.tex"
+
+  # open if exists
+  if [ -f "$FILE" ]; then
+    echo "📓 Opening today's entry..."
+    nvim "$FILE"
+    return
+  fi
+
+  # create new
+  cat <<EOF > "$FILE"
+% !TEX root = ../main.tex
+\\section{\\bf $DATE - $DAY}
+
+\\vspace{1em}\\noindent\\rule{\\linewidth}{0.4pt}
+
+EOF
+
+  # add to entries.tex
+  if ! grep -q "$DATE.tex" "$ENTRIES_TEX" 2>/dev/null; then
+    echo "\\dailytasks{$LABELDATE}{entries/$DATE.tex}" >> "$ENTRIES_TEX"
+  fi
+
+  echo "✅ Created today's entry: $DATE"
+  nvim "$FILE"
+}
+
+# -----------------------------------------
+# 📂 Create/Open Task
+# -----------------------------------------
+create_task() {
+  local name="$*"
+  [ -z "$name" ] && echo "❌ Task name required" && exit 1
+
+  local file=$(task_file "$name")
+
+  if [ -f "$file" ]; then
+    echo "📂 Task exists. Opening..."
+    nvim "$file"
+    exit 0
+  fi
+
+  cat <<EOF > "$file"
+\tasktitle{$name}
+\addcontentsline{toc}{section}{$name}
+
+\\begin{itemize}
+
+\\end{itemize}
+EOF
+
+  echo "✅ Created task: $name"
+  rebuild_tasks
+  nvim "$file"
+}
+
+# -----------------------------------------
+# Open Task
+# -----------------------------------------
+open_task() {
+  local file=$(task_file "$*")
+  [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
+  nvim "$file"
+}
+
+# -----------------------------------------
+# Add item to task
+# -----------------------------------------
+add_item() {
+  local name="$1"
+  shift
+  local text="$*"
+
+  [ -z "$name" ] || [ -z "$text" ] && \
+    echo "Usage: sb add \"task\" \"text\"" && exit 1
+
+  local file=$(task_file "$name")
+  [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
+
+  sed -i "/\\\\end{itemize}/i \\\\item $text" "$file"
+
+  echo "✅ Added to $name"
+}
+
+# -----------------------------------------
+# Delete Task
+# -----------------------------------------
+delete_task() {
+  local file=$(task_file "$*")
+  [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
+
+  rm "$file"
+  echo "🗑️ Deleted: $*"
+
+  rebuild_tasks
+
+  # Clean LaTeX cache
+  rm -f "$JOURNAL_DIR"/*.toc \
+        "$JOURNAL_DIR"/*.aux \
+        "$JOURNAL_DIR"/*.out
+
+  echo "♻️ LaTeX cache cleared. Recompile twice."
+}
+
+# -----------------------------------------
+# Archive Task
+# -----------------------------------------
+archive_task() {
+  local file=$(task_file "$*")
+  [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
+
+  mv "$file" "$ARCHIVE_DIR/"
+  echo "📦 Archived: $*"
+  rebuild_tasks
+}
+
+# -----------------------------------------
+# Hide Task
+# -----------------------------------------
+hide_task() {
+  local file=$(task_file "$*")
+  [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
+
+  grep -q "^% HIDDEN" "$file" || sed -i '1i % HIDDEN' "$file"
+
+  echo "🙈 Hidden: $*"
+  rebuild_tasks
+}
+
+# -----------------------------------------
+# Unhide Task
+# -----------------------------------------
+unhide_task() {
+  local file=$(task_file "$*")
+  [ ! -f "$file" ] && echo "❌ Task not found" && exit 1
+
+  sed -i '/^% HIDDEN/d' "$file"
+
+  echo "👁️ Unhidden: $*"
+  rebuild_tasks
+}
+
+# -----------------------------------------
+# Rebuild tasks.tex
+# -----------------------------------------
+rebuild_tasks() {
+  echo "% Auto-generated. Do not edit." > "$TASKS_INDEX"
+  echo "" >> "$TASKS_INDEX"
+
+  for f in $(ls "$TASKS_DIR"/*.tex 2>/dev/null | sort); do
+    if grep -q "^% HIDDEN" "$f"; then
+      continue
+    fi
+
+    name=$(basename "$f")
+    echo "\\input{tasks/$name}" >> "$TASKS_INDEX"
+    echo "\\vspace{2em}" >> "$TASKS_INDEX"
+  done
+
+  echo "✅ Rebuilt tasks.tex"
+}
+
+# -----------------------------------------
+# List tasks
+# -----------------------------------------
+list_tasks() {
+  ls "$TASKS_DIR" | sed 's/.tex//'
+}
+
+# -----------------------------------------
+# Fuzzy search
+# -----------------------------------------
+pick_task() {
+  command -v fzf >/dev/null || { echo "❌ fzf not installed"; exit 1; }
+
+  choice=$(ls "$TASKS_DIR" | fzf)
+  [ -z "$choice" ] && exit 0
+
+  nvim "$TASKS_DIR/$choice"
+}
+
+# -----------------------------------------
+# Help
+# -----------------------------------------
+help() {
+  cat <<EOF
+SecondBrain CLI
+
+📓 Journal:
+  today              Open today's journal entry
+
+📂 Tasks:
+  task <name>        Create/open task
+  open <name>        Open task
+  add <task> <text>  Add item
+  delete <task>      Delete permanently
+  archive <task>     Move to archive
+  hide <task>        Hide from PDF
+  unhide <task>      Show again
+
+🔧 Utilities:
+  pick               Fuzzy search (fzf)
+  list               List tasks
+  rebuild            Rebuild tasks.tex
+  help               Show this help
+EOF
+}
+
+# -----------------------------------------
+# Router
+# -----------------------------------------
+case "$1" in
+  today) today_entry ;;
+  task) shift; create_task "$*" ;;
+  open) shift; open_task "$*" ;;
+  add) shift; add_item "$@" ;;
+  delete) shift; delete_task "$*" ;;
+  archive) shift; archive_task "$*" ;;
+  hide) shift; hide_task "$*" ;;
+  unhide) shift; unhide_task "$*" ;;
+  pick) pick_task ;;
+  list) list_tasks ;;
+  rebuild) rebuild_tasks ;;
+  help|*) help ;;
+esac
